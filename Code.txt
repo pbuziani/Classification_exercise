@@ -1,0 +1,219 @@
+#Πηνελόπη Μπουζιάνη p3200115
+library(class)
+library(tree)
+library(glmnet)
+library(pgmm)
+library(klaR)
+library(dplyr)
+library(scoring)
+library(e1071)
+library(readxl)
+library(rpart)
+library(caret)
+library("AER")
+library(pROC)
+
+data <- read_excel("D:/OneDrive - aueb.gr/Desktop/StatML23/project 2 2023-2024/project2.xls")
+#data <- na.omit(data)
+
+# Λίστα με τις κατηγορικές μεταβλητές
+categorical_variables <- c("job", "marital", "education", "default", "housing", "loan", "contact", "month", "day_of_week", "poutcome")
+
+
+
+##############ΔΕΝΤΡΑ ΑΠΟΦΑΣΕΩΝ################## 
+
+
+# Κωδικοποίηση των κατηγορικών μεταβλητών σε δυαδική μορφή (One-Hot Encoding)
+data_encoded <- model.matrix(~ . - 1, data = data) #SUBSCRIBEDyes
+
+# Εκπαίδευση δέντρου απόφασης
+model <- rpart(SUBSCRIBEDyes ~ ., data = as.data.frame(data_encoded), method = "class")
+
+# Αξιολόγηση σημασίας χαρακτηριστικών
+importance <- model$variable.importance
+
+# Επιλογή των σημαντικών χαρακτηριστικών (πχ, επιλογή των πρώτων 10)
+selected_features <- names(importance)[order(importance, decreasing = TRUE)][1:10]
+
+ print(selected_features)
+ "[1] "duration"            "nr.employed"         "euribor3m"           "emp.var.rate"        "cons.conf.idx"       "cons.price.idx"      "pdays"      "poutcomesuccess"    
+ [9] "previous"            "poutcomenonexistent""
+ 
+
+# Διαχωρισμός του dataset (π.χ., 80% εκπαίδευση, 20% ελέγχου)
+set.seed(123)  # Για αναπαραγωγή των αποτελεσμάτων
+indices <- sample(1:nrow(data_encoded), 0.8 * nrow(data_encoded))
+
+# Δημιουργία συνόλου εκπαίδευσης
+train_data <- data_encoded[indices, ]
+
+# Δημιουργία συνόλου ελέγχου (υπόλοιπο 20%)
+test_data <- data_encoded[-indices, ]
+
+# Ορισμός του μοντέλου Δέντρου Απόφασης
+tree_model <- rpart(SUBSCRIBEDyes ~ ., data = as.data.frame(train_data), method = "class")
+
+# Εκτύπωση του δέντρου
+print(tree_model)
+
+test_data_df <- as.data.frame(test_data)
+
+# Αξιολόγηση Μοντέλου
+predictions <- predict(tree_model, test_data_df , type = "class")
+conf_matrix <- table(test_data_df$SUBSCRIBEDyes, predictions)
+accuracy <- sum(diag(conf_matrix)) / sum(conf_matrix)
+precision <- conf_matrix[2, 2] / sum(conf_matrix[, 2])
+recall <- conf_matrix[2, 2] / sum(conf_matrix[2, ])
+f1_score <- 2 * (precision * recall) / (precision + recall)
+
+# Εκτύπωση των μετρικών
+cat("Accuracy:", accuracy, "\n")
+Accuracy: 0.9152564 
+cat("Precision:", precision, "\n")
+Precision: 0.5735294 
+cat("Recall:", recall, "\n")
+Recall: 0.4582245 
+cat("F1-Score:", f1_score, "\n")
+F1-Score: 0.509434 
+
+
+# Υπολογισμός πιθανοτήτων πρόβλεψης
+probabilities <- predict(tree_model, test_data_df, type = "prob")[, 2]
+
+# Δημιουργία αντικειμένου ROC
+roc_curve <- roc(test_data_df$SUBSCRIBED, probabilities)
+
+# Εμφάνιση της καμπύλης ROC
+plot(roc_curve, main = "ROC Curve", col = "blue", lwd = 2)
+
+# Υπολογισμός της περιοχής κάτω από την καμπύλη ROC (ROC-AUC)
+roc_auc <- auc(roc_curve)
+cat("ROC-AUC:", roc_auc, "\n") #eikona
+ROC-AUC: 0.8473335
+
+
+######################## Logistic Regression####################################
+
+
+# Κωδικοποίηση των κατηγορικών μεταβλητών σε δυαδική μορφή (One-Hot Encoding)
+data <- model.matrix(~ . - 1, data = data) #SUBSCRIBEDyes
+
+# Διαίρεση των δεδομένων σε σύνολα εκπαίδευσης και ελέγχουset.seed(123)  # Για αναπαραγωγή των αποτελεσμάτων
+set.seed(123)  # Για αναπαραγωγή των αποτελεσμάτων
+indices <- sample(1:nrow(data), 0.8 * nrow(data))
+
+# Δημιουργία συνόλου εκπαίδευσης
+train_data <- data[indices, ]
+
+# Δημιουργία συνόλου ελέγχου (υπόλοιπο 20%)
+test_data <- data[-indices, ]
+
+# Εκπαίδευση του μοντέλου λογιστικής παλινδρομησης
+model <- glm(SUBSCRIBEDyes ~ ., data = as.data.frame(train_data), family = binomial(link = "logit"))
+
+# Προβλέψεις στα δεδομένα ελέγχου
+predictions <- predict(model, newdata = as.data.frame(test_data), type = "response")
+
+conf_matrix <- table(as.data.frame(test_data)$SUBSCRIBEDyes, predictions)
+accuracy <- sum(diag(conf_matrix)) / sum(conf_matrix)
+
+
+# Εκτύπωση των μετρικών
+cat("Accuracy:", accuracy, "\n")
+Accuracy: 0.0001253604 
+
+
+#hyperparameter tuning and cross-validation
+
+
+# Create a training control
+ctrl <- trainControl(method = "cv", number = 5)
+
+# Tune the model using cross-validated grid search
+grid <- expand.grid(.alpha = seq(0, 1, 0.1), .lambda = seq(0.001, 0.1, 0.001))
+model <- train(SUBSCRIBEDyes ~ ., data = as.data.frame(train_data), method = "glmnet", trControl = ctrl, tuneGrid = grid)
+
+# Use the tuned model for predictions
+predictions <- predict(model, newdata = as.data.frame(test_data), type = "response")
+
+# Evaluate the model and print metrics
+conf_matrix <- table(as.data.frame(test_data)$SUBSCRIBEDyes, predictions > 0.5)
+accuracy <- sum(diag(conf_matrix)) / sum(conf_matrix)
+precision <- conf_matrix[2, 2] / sum(conf_matrix[, 2])
+recall <- conf_matrix[2, 2] / sum(conf_matrix[2, ])
+f1_score <- 2 * (precision * recall) / (precision + recall)
+
+
+# Print the metrics
+cat("Accuracy:", accuracy, "\n")
+Accuracy: 0.9140028 
+cat("Precision:", precision, "\n")
+Precision: 0.583682 
+cat("Recall:", recall, "\n")
+Recall: 0.3642298 
+cat("F1-Score:", f1_score, "\n")
+F1-Score: 0.4485531 
+
+# Υπολογισμός πιθανοτήτων πρόβλεψης
+# Predict probabilities for the positive class
+probabilities <- predict(model, newdata = as.data.frame(test_data), type = "raw")
+
+
+# Δημιουργία αντικειμένου ROC
+roc_curve <- roc(as.data.frame(test_data)$SUBSCRIBEDyes, probabilities)
+
+# Εμφάνιση της καμπύλης ROC
+plot(roc_curve, main = "ROC Curve", col = "blue", lwd = 2)
+
+# Υπολογισμός της περιοχής κάτω από την καμπύλη ROC (ROC-AUC)
+roc_auc <- auc(roc_curve)
+cat("ROC-AUC:", roc_auc, "\n") #eikona
+ROC-AUC: 0.9289083 
+
+
+#########################K-nn######################
+
+# Κωδικοποίηση των κατηγορικών μεταβλητών σε δυαδική μορφή (One-Hot Encoding)
+data <- model.matrix(~ . - 1, data = data) #SUBSCRIBEDyes
+
+# Διαίρεση των δεδομένων σε σύνολα εκπαίδευσης και ελέγχουset.seed(123)  # Για αναπαραγωγή των αποτελεσμάτων
+set.seed(123)  # Για αναπαραγωγή των αποτελεσμάτων
+indices <- sample(1:nrow(data), 0.8 * nrow(data))
+
+# Δημιουργία συνόλου εκπαίδευσης
+train_data <- data[indices, ]
+
+# Δημιουργία συνόλου ελέγχου (υπόλοιπο 20%)
+test_data <- data[-indices, ]
+
+k_value <- 5  # Ορισμός της τιμής του k
+model_knn <- knn(train = train_data[, -ncol(train_data)], 
+                 test = test_data[, -ncol(test_data)], 
+                 cl = as.data.frame(train_data)$SUBSCRIBEDyes, 
+                 k = k_value)
+				 
+accuracy <- sum(model_knn == as.data.frame(test_data)$SUBSCRIBEDyes) / length(as.data.frame(test_data)$SUBSCRIBEDyes)
+
+cat("Accuracy:", accuracy))
+Accuracy: 0.91187163093895
+cat("Precision:", precision)
+Precision: 0.5735294 
+cat("Recall:", recall)
+Recall: 0.4582245 
+cat("F1-Score:", f1_score)
+F1-Score: 0.509434 
+
+probabilities <- predict(model_knn, newdata = as.data.frame(test_data), type = "raw")
+
+
+# Δημιουργία αντικειμένου ROC
+roc_curve <- roc(as.data.frame(test_data)$SUBSCRIBEDyes, probabilities)
+
+# Εμφάνιση της καμπύλης ROC
+plot(roc_curve, main = "ROC Curve", col = "blue", lwd = 2)
+
+# Υπολογισμός της περιοχής κάτω από την καμπύλη ROC (ROC-AUC)
+roc_auc <- auc(roc_curve)
+cat("ROC-AUC:", roc_auc, "\n") #eikona
+ROC-AUC: 0.8473335 
